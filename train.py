@@ -7,50 +7,64 @@ from keras.callbacks import ModelCheckpoint
 # 0.准备训练所需数据------------------------------
 data_args = data_hparams()
 data_args.data_type = 'train'
-data_args.data_path = '../dataset/'
-data_args.thchs30 = True
-data_args.aishell = True
-data_args.prime = True
-data_args.stcmd = True
+#data_args.data_path = '../dataset/'
+data_args.data_path = './dataset/'
+data_args.thchs30 = True ##暂时先用一个
+data_args.aishell = True# 这个数据集会报错,因为新增一个数据集，会导致模型的词汇变多，模型也会动态变化。要删除所有保存的模型
+data_args.prime   = True
+data_args.mydata  = True
+data_args.stcmd   = True  # 这个数据集会报错,而且用不了GPU，写False
 data_args.batch_size = 4
-data_args.data_length = 10
-# data_args.data_length = None
+data_args.data_length = None
+
 data_args.shuffle = True
 train_data = get_data(data_args)
 
-# 0.准备验证所需数据------------------------------
+# 0.准备验证所需数据------------------------------ 验证集要和测试集的库对应或者不能全部关闭。否则会出现不能使用GPU的情况
 data_args = data_hparams()
 data_args.data_type = 'dev'
-data_args.data_path = '../dataset/'
+data_args.data_path = './dataset/'
+#data_args.data_path = '../dataset/'
 data_args.thchs30 = True
 data_args.aishell = True
-data_args.prime = False
-data_args.stcmd = False
+data_args.prime   = True#与训练数据不匹配是因为，thchs30和aishell才有验证数据集，所以只能是False,否则报错
+data_args.stcmd   = True#其中primewords、st-cmd目前未区分训练集测试集，所以只能是False,否则报错
+data_args.mydata  = True
 data_args.batch_size = 4
 # data_args.data_length = None
-data_args.data_length = 10
+data_args.data_length = None
 data_args.shuffle = True
 dev_data = get_data(data_args)
 
-# 1.声学模型训练-----------------------------------
-from model_speech.cnn_ctc import Am, am_hparams
+# 1.声学模型训练-----------------------------------我们使用 GRU-CTC的结构搭建了第一个声学模型，该模型在项目的gru_ctc.py文件中。
+# 利用循环神经网络可以利用语音上下文相关的信息，得到更加准确地信息，而GUR又能选择性的保留需要的长时信息，使用双向rnn又能够充分的利用上下文信号。
+# 但该方法缺点是一句话说完之后才能进行识别，且训练相对cnn较慢
+from model_speech.cnn_ctc import Am, am_hparams #org
+# from model_speech.gru_ctc import Am, am_hparams # gru效果好，但 慢
 am_args = am_hparams()
-am_args.vocab_size = len(train_data.am_vocab)
-am_args.gpu_nums = 1
+am_args.vocab_size = len(train_data.am_vocab)#CH30是1042
+print("am_vocab= ",am_args.vocab_size)
+am_args.gpu_nums = 2
 am_args.lr = 0.0008
 am_args.is_training = True
 am = Am(am_args)
 
-if os.path.exists('logs_am/model.h5'):
-    print('load acoustic model...')
-    am.ctc_model.load_weights('logs_am/model.h5')
+if os.path.exists('logs_am_my/model.h5'):
+    print('load acoustic model...')#声学的
+    am.ctc_model.load_weights('logs_am_my/model.h5')
 
-epochs = 10
+epochs = 1
 batch_num = len(train_data.wav_lst) // train_data.batch_size
 
 # checkpoint
-ckpt = "model_{epoch:02d}-{val_acc:.2f}.hdf5"
-checkpoint = ModelCheckpoint(os.path.join('./checkpoint', ckpt), monitor='val_loss', save_weights_only=False, verbose=1, save_best_only=True)
+#ckpt = "model_{epoch:02d}-{val_acc:.2f}.hdf5"
+ckpt = "model_{epoch:02d}-{val_loss:.2f}.hdf5" #org: val_acc
+
+checkpoint = ModelCheckpoint(os.path.join('./checkpoint', ckpt),
+                             monitor='val_loss',
+                             save_weights_only=False,
+                             verbose=1,
+                             save_best_only=True)
 
 #
 # for k in range(epochs):
@@ -62,8 +76,15 @@ checkpoint = ModelCheckpoint(os.path.join('./checkpoint', ckpt), monitor='val_lo
 batch = train_data.get_am_batch()
 dev_batch = dev_data.get_am_batch()
 
-am.ctc_model.fit_generator(batch, steps_per_epoch=batch_num, epochs=10, callbacks=[checkpoint], workers=1, use_multiprocessing=False, validation_data=dev_batch, validation_steps=200)
-am.ctc_model.save_weights('logs_am/model.h5')
+
+##！！！！！！！这里修改声学模型EPOCHS
+am.ctc_model.fit_generator(batch, steps_per_epoch=batch_num, epochs=10 ,
+                           callbacks=[checkpoint],
+                           workers=1,
+                           use_multiprocessing=False,
+                           validation_data=dev_batch,
+                           validation_steps=200)
+am.ctc_model.save_weights('logs_am_my/model.h5')
 
 
 # 2.语言模型训练-------------------------------------------
@@ -80,19 +101,19 @@ lm_args.lr = 0.0003
 lm_args.is_training = True
 lm = Lm(lm_args)
 
-epochs = 10
+epochs = 1
 with lm.graph.as_default():
     saver =tf.train.Saver()
 with tf.Session(graph=lm.graph) as sess:
     merged = tf.summary.merge_all()
     sess.run(tf.global_variables_initializer())
     add_num = 0
-    if os.path.exists('logs_lm/checkpoint'):
+    if os.path.exists('logs_lm_my/checkpoint'):
         print('loading language model...')
-        latest = tf.train.latest_checkpoint('logs_lm')
+        latest = tf.train.latest_checkpoint('logs_lm_my')
         add_num = int(latest.split('_')[-1])
         saver.restore(sess, latest)
-    writer = tf.summary.FileWriter('logs_lm/tensorboard', tf.get_default_graph())
+    writer = tf.summary.FileWriter('logs_lm_my/tensorboard', tf.get_default_graph())
     for k in range(epochs):
         total_loss = 0
         batch = train_data.get_lm_batch()
@@ -105,5 +126,5 @@ with tf.Session(graph=lm.graph) as sess:
                 rs=sess.run(merged, feed_dict=feed)
                 writer.add_summary(rs, k * batch_num + i)
         print('epochs', k+1, ': average loss = ', total_loss/batch_num)
-    saver.save(sess, 'logs_lm/model_%d' % (epochs + add_num))
+    saver.save(sess, 'logs_lm_my/model_%d' % (epochs + add_num))
     writer.close()

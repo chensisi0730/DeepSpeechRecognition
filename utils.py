@@ -1,4 +1,5 @@
 import os
+# os.environ["TF_XLA_FLAGS"]="--tf_xla_cpu_global_jit"
 import difflib
 import numpy as np
 import tensorflow as tf
@@ -13,7 +14,7 @@ def data_hparams():
     params = tf.contrib.training.HParams(
         # vocab
         data_type='train',
-        data_path='data/',
+        data_path='./dataset/',
         thchs30=True,
         aishell=True,
         prime=True,
@@ -32,6 +33,7 @@ class get_data():
         self.aishell = args.aishell
         self.prime = args.prime
         self.stcmd = args.stcmd
+        self.mydata = args.mydata
         self.data_length = args.data_length
         self.batch_size = args.batch_size
         self.shuffle = args.shuffle
@@ -46,23 +48,27 @@ class get_data():
             if self.aishell == True:
                 read_files.append('aishell_train.txt')
             if self.prime == True:
-                read_files.append('prime.txt')
+                read_files.append('prime.txt')#其中primewords、st-cmd目前只有训练集。
             if self.stcmd == True:
                 read_files.append('stcmd.txt')
+            if self.mydata == True:
+                read_files.append('mydata_train.txt')
         elif self.data_type == 'dev':
             if self.thchs30 == True:
                 read_files.append('thchs_dev.txt')
             if self.aishell == True:
                 read_files.append('aishell_dev.txt')
+            if self.mydata == True:
+                read_files.append('mydata_dev.txt')
         elif self.data_type == 'test':
             if self.thchs30 == True:
                 read_files.append('thchs_test.txt')
             if self.aishell == True:
                 read_files.append('aishell_test.txt')
-        self.wav_lst = []
-        self.pny_lst = []
-        self.han_lst = []
-        for file in read_files:
+        self.wav_lst = []#音频文件的相对路径的LIST
+        self.pny_lst = []#拼音
+        self.han_lst = []#汉字
+        for file in read_files:#这些数据库的列表文件,在工程目录的DATA目录下面，包含拼音，汉字，应该是作者把原版数据集合中的内容整合进来形成的。这里是写的不好的地方，不方便整合其他数据集，并且不统一
             print('load ', file, ' data...')
             sub_file = 'data/' + file
             with open(sub_file, 'r', encoding='utf8') as f:
@@ -76,9 +82,10 @@ class get_data():
             self.wav_lst = self.wav_lst[:self.data_length]
             self.pny_lst = self.pny_lst[:self.data_length]
             self.han_lst = self.han_lst[:self.data_length]
-        print('make am vocab...')
+        print('make am vocab...')#生成拼音词汇的词典
         self.am_vocab = self.mk_am_vocab(self.pny_lst)
-        print('make lm pinyin vocab...')
+        #print('make am pinyin vocab...ok  vocab_len=', len(self.am_vocab))
+        print('make lm pinyin vocab... ')
         self.pny_vocab = self.mk_lm_pny_vocab(self.pny_lst)
         print('make lm hanzi vocab...')
         self.han_vocab = self.mk_lm_han_vocab(self.han_lst)
